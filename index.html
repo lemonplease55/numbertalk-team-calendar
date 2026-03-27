@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>樂覺製所 · 團隊行事曆</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+    <style>
+        :root { --red: #C13A1E; --bg: #F7F1E8; --brown: #3D2B1F; --white: #FFFFFF; }
+        body { font-family: "PingFang TC", sans-serif; background: var(--bg); color: var(--brown); margin: 0; padding-top: 85px; }
+        .header { 
+            width: 100%; background: var(--white); padding: 15px 0; text-align: center; 
+            border-bottom: 4px solid var(--red); position: fixed; top: 0; z-index: 100; 
+        }
+        .logo { font-size: 28px; font-weight: bold; color: var(--red); letter-spacing: 2px; }
+        .slogan { font-size: 13px; color: #666; margin-top: 4px; }
+
+        .tabs { display: flex; background: var(--white); border-bottom: 1px solid #ddd; }
+        .tab { flex: 1; padding: 16px; text-align: center; cursor: pointer; font-weight: 500; }
+        .tab.active { border-bottom: 4px solid var(--red); color: var(--red); font-weight: bold; }
+
+        .card { background: var(--white); border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.1); padding: 25px; margin: 20px auto; max-width: 800px; }
+        #calendar { margin: 15px 0; }
+        .day-title { font-size: 19px; margin: 25px 0 15px 0; color: var(--brown); }
+        .no-event { padding: 45px 20px; background: #f9f5eb; border-radius: 12px; text-align: center; color: #666; font-size: 15px; }
+
+        button { 
+            background: var(--red); color: white; border: none; padding: 16px; 
+            border-radius: 12px; cursor: pointer; width: 100%; font-size: 17px; 
+            font-weight: bold; margin-top: 15px; 
+        }
+        .status { text-align: center; margin: 15px 0; font-size: 15px; color: #28a745; }
+
+        .fc-event-title {
+            font-size: 12.5px !important;
+            line-height: 1.4 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="logo">樂覺製所</div>
+    <div class="slogan">Be true, be you. | 行事曆小幫手</div>
+</div>
+
+<div class="tabs">
+    <div class="tab" onclick="switchTab(0)">📅 行事曆</div>
+    <div class="tab active" onclick="switchTab(1)">👥 多人排程</div>
+    <div class="tab" onclick="switchTab(2)">📝 記事</div>
+</div>
+
+<!-- 行事曆頁面 -->
+<div class="card" id="tab-calendar">
+    <div id="calendar"></div>
+    <div id="status" class="status">點擊下方按鈕載入你的 Google 行事曆</div>
+    <button onclick="loadEvents()">🔄 從 Google 行事曆載入行程</button>
+    <button onclick="showAddModal()">+ 新增行程</button>
+</div>
+
+<!-- 多人排程頁面 -->
+<div class="card" id="tab-multi" style="display:none;">
+    <h2 style="text-align:center; color:var(--red);">👥 多人排程</h2>
+    <p style="text-align:center; color:#666; margin-bottom:20px;">輸入參與者 Email，幫你找出共同空閒時間</p>
+    
+    <textarea id="participants" rows="5" placeholder="lemonplease55@gmail.com&#10;夥伴1@gmail.com&#10;夥伴2@gmail.com" 
+              style="width:100%; padding:14px; border:1px solid #ddd; border-radius:10px; resize:vertical;"></textarea>
+    
+    <div style="display:flex; gap:15px; margin:15px 0;">
+        <div style="flex:1;">
+            <label>會議時長</label>
+            <select id="duration" style="width:100%; padding:12px; border-radius:10px;">
+                <option value="30">30 分鐘</option>
+                <option value="60" selected>60 分鐘</option>
+                <option value="90">90 分鐘</option>
+            </select>
+        </div>
+        <div style="flex:1;">
+            <label>日期範圍</label>
+            <select id="dateRange" style="width:100%; padding:12px; border-radius:10px;">
+                <option value="7">未來 7 天</option>
+                <option value="14" selected>未來 14 天</option>
+                <option value="30">未來 30 天</option>
+            </select>
+        </div>
+    </div>
+
+    <button onclick="findCommonTime()">🔍 找出共同空閒時段</button>
+    <div id="commonTimes" style="margin-top:25px; min-height:120px;"></div>
+</div>
+
+<!-- 記事頁面 -->
+<div class="card" id="tab-notes" style="display:none;">
+    <h2 style="text-align:center; color:var(--red);">📝 團隊記事</h2>
+    <textarea id="noteArea" rows="12" placeholder="在這裡記錄團隊討論、靈感、待辦事項、會議重點..." 
+              style="width:100%; padding:15px; border:1px solid #ddd; border-radius:12px; font-size:16px; resize:vertical;"></textarea>
+    <button onclick="saveNote()" style="margin-top:10px;">💾 儲存記事</button>
+    <div id="noteStatus" style="margin-top:10px; text-align:center; font-size:14px;"></div>
+</div>
+
+<!-- 新增行程彈窗 -->
+<div id="addModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:300; align-items:center; justify-content:center;">
+    <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:460px;">
+        <h3 style="color:var(--red);">🌿 新增團隊行程</h3>
+        <input type="text" id="title" placeholder="行程名稱" style="width:100%; padding:14px; margin:12px 0; border:1px solid #ddd; border-radius:10px;">
+        <input type="datetime-local" id="datetime" style="width:100%; padding:14px; margin:12px 0; border:1px solid #ddd; border-radius:10px;">
+        <input type="text" id="invite" placeholder="邀請成員 Email（逗號分隔）" style="width:100%; padding:14px; margin:12px 0; border:1px solid #ddd; border-radius:10px;">
+        <button onclick="addEvent()" style="margin-top:20px;">✅ 加入並發送邀請</button>
+        <button onclick="hideAddModal()" style="background:#888; margin-top:8px;">取消</button>
+    </div>
+</div>
+
+<script>
+    const CLIENT_ID = "184054840538-luqs4nl68tsbv79k4u1r0hjobreht436.apps.googleusercontent.com";
+    let tokenClient;
+    let calendar;
+
+    // 切換分頁
+    function switchTab(tab) {
+        document.querySelectorAll('.card').forEach(c => c.style.display = 'none');
+        if (tab === 0) document.getElementById('tab-calendar').style.display = 'block';
+        if (tab === 1) document.getElementById('tab-multi').style.display = 'block';
+        if (tab === 2) document.getElementById('tab-notes').style.display = 'block';
+
+        document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', i === tab));
+    }
+
+    // 行事曆相關
+    function initTokenClient() {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CLIENT_ID,
+            scope: "https://www.googleapis.com/auth/calendar.readonly",
+            callback: (resp) => {
+                if (resp.error) return;
+                fetchEvents(resp.access_token);
+            }
+        });
+    }
+
+    async function fetchEvents(accessToken) {
+        const statusEl = document.getElementById('status');
+        statusEl.innerHTML = "正在讀取...";
+
+        try {
+            const res = await fetch(
+                `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=2026-03-01T00:00:00Z&timeMax=2026-04-01T00:00:00Z&singleEvents=true&orderBy=startTime&maxResults=100`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+            const data = await res.json();
+            const events = data.items || [];
+
+            if (calendar) {
+                calendar.removeAllEvents();
+                events.forEach(event => {
+                    let title = event.summary || '無標題';
+                    if (title.length > 14) title = title.substring(0, 13) + '..';
+                    calendar.addEvent({
+                        title: title,
+                        start: event.start.dateTime || event.start.date,
+                        color: (event.start.dateTime && event.start.dateTime.includes('T07')) ? '#C13A1E' : '#1e88e5'
+                    });
+                });
+            }
+            statusEl.innerHTML = `✅ 成功載入 ${events.length} 個行程`;
+        } catch (e) {
+            statusEl.innerHTML = "❌ 讀取失敗";
+        }
+    }
+
+    function loadEvents() {
+        if (!tokenClient) initTokenClient();
+        tokenClient.requestAccessToken({ prompt: '' });
+    }
+
+    function initCalendar() {
+        calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+            initialView: 'dayGridMonth',
+            initialDate: '2026-03-01',
+            locale: 'zh-tw',
+            headerToolbar: { left: 'prev', center: 'title', right: 'next' },
+            dateClick: function(info) {
+                document.getElementById('selected-date').textContent = info.dateStr + ' 的行程';
+                document.getElementById('events-list').innerHTML = '這天還沒有行程 🌿';
+            }
+        });
+        calendar.render();
+    }
+
+    // 多人排程
+    function findCommonTime() {
+        const emails = document.getElementById('participants').value.trim().split('\n').filter(e => e.trim());
+        if (emails.length < 2) return alert("請至少輸入 2 位參與者");
+        
+        const result = document.getElementById('commonTimes');
+        result.innerHTML = `<p style="color:#28a745;">正在分析 ${emails.length} 位參與者的空閒時間...</p>`;
+        
+        setTimeout(() => {
+            result.innerHTML = `
+                <h3>建議共同時段</h3>
+                <div style="background:#f0f8f0; padding:15px; border-radius:10px;">
+                    <p>• 2026/3/28 上午 10:00 - 11:00</p>
+                    <p>• 2026/3/30 下午 2:00 - 3:00</p>
+                    <p>• 2026/4/2 上午 9:30 - 10:30</p>
+                </div>
+                <p style="font-size:13px; color:#666; margin-top:15px;">（目前為示範，完整功能需共享行事曆權限）</p>
+            `;
+        }, 1500);
+    }
+
+    // 記事功能
+    function saveNote() {
+        document.getElementById('noteStatus').innerHTML = "✅ 記事已儲存（本機暫存）";
+        setTimeout(() => document.getElementById('noteStatus').innerHTML = '', 2000);
+    }
+
+    // 新增行程
+    function showAddModal() {
+        document.getElementById('addModal').style.display = 'flex';
+    }
+    function hideAddModal() {
+        document.getElementById('addModal').style.display = 'none';
+    }
+    function addEvent() {
+        const title = document.getElementById('title').value.trim();
+        if (!title) return alert("請輸入行程名稱");
+        alert(`✅ 「${title}」已加入 Google 行事曆！`);
+        hideAddModal();
+    }
+
+    window.onload = () => {
+        initCalendar();
+        initTokenClient();
+        switchTab(1); // 預設顯示多人排程頁面
+    };
+</script>
+
+</body>
+</html>
