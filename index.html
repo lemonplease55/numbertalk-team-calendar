@@ -186,6 +186,13 @@ body{font-family:'Noto Sans TC',sans-serif;background:#D8CFC4;min-height:100vh;d
 .toast.error{background:#8B2510}
 
 .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+
+/* EDIT MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(61,43,31,.45);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-box{background:var(--bg0);border-radius:16px;padding:22px;width:100%;max-width:420px;box-shadow:0 12px 40px rgba(61,43,31,.2);border:1px solid var(--border)}
+.modal-title{font-size:15px;font-weight:700;color:var(--txt1);margin-bottom:16px;font-family:'Noto Serif TC',serif}
+.modal-btns{display:flex;gap:8px;margin-top:14px}
+
 .footer{padding:10px 16px;text-align:center;font-size:10.5px;color:var(--txt3);border-top:1px solid var(--border);background:var(--bg2)}
 
 @keyframes pop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
@@ -487,10 +494,14 @@ async function loadGcalEvents() {
       gcalEventsMap[key].push({
         title: ev.summary || '行程',
         time,
+        startDT: ev.start?.dateTime || '',
+        endDT: ev.end?.dateTime || '',
+        location: ev.location || '',
         hasAttendees: (ev.attendees || []).length > 1,
         attendeeCount: (ev.attendees || []).length,
         hasMeet: !!(ev.conferenceData),
-        meetLink: ev.conferenceData?.entryPoints?.[0]?.uri || ''
+        meetLink: ev.conferenceData?.entryPoints?.[0]?.uri || '',
+        eventId: ev.id || ''
       });
     });
     renderCal();
@@ -535,7 +546,7 @@ async function addGcalEvent() {
     const result = await gcalFetch('/calendars/primary/events' + conferenceVersion, 'POST', body);
     if (result.id) {
       if (!gcalEventsMap[selDate]) gcalEventsMap[selDate] = [];
-      gcalEventsMap[selDate].push({ title: name, time: t1, hasAttendees: attendees.length > 0, attendeeCount: attendees.length+1, hasMeet: useMeet });
+      gcalEventsMap[selDate].push({ title: name, time: t1, hasAttendees: attendees.length > 0, attendeeCount: attendees.length+1, hasMeet: useMeet, eventId: result.id || '' });
       renderCal(); renderEvents(); clearForm();
       showToast(attendees.length ? '✅ 已新增！邀請通知已寄出 📧' : '✅ 已加入 Google 行事曆', 'success');
     } else {
@@ -689,16 +700,20 @@ function renderEvents() {
   const evs = gcalEventsMap[selDate] || [];
   const el  = document.getElementById('evScroll');
   if (!evs.length) { el.innerHTML = '<div class="ev-empty"><span style="font-size:28px">🌿</span><span>這天還沒有行程</span></div>'; return; }
-  el.innerHTML = evs.map(e => `
+  el.innerHTML = evs.map((e,i) => `
     <div class="ev-item${e.hasAttendees?' multi-ev':''}">
       <div class="ev-body">
         <div class="ev-name">${escHtml(e.title)}</div>
         <div class="ev-meta">
           ${e.time ? `<span class="ev-time">⏰ ${e.time}</span>` : ''}
           ${e.hasAttendees ? `<span style="font-size:11px;color:var(--txt3)">👥 ${e.attendeeCount} 人</span>` : ''}
-          ${e.hasMeet ? `<span class="ev-badge">Meet</span>` : ''}
+          ${e.hasMeet ? `<a href="${e.meetLink||'#'}" target="_blank" class="ev-badge" style="text-decoration:none">Meet</a>` : ''}
           <span class="ev-badge">${e.hasAttendees ? '多人' : '個人'}</span>
         </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+        ${e.eventId ? `<button onclick="openEditModal('${e.eventId}',${i})" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--txt2);cursor:pointer;font-family:'Noto Sans TC',sans-serif" title="編輯">✏️</button>` : ''}
+        ${e.eventId ? `<button onclick="deleteEvent('${e.eventId}',${i})" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--txt3);cursor:pointer;font-family:'Noto Sans TC',sans-serif" title="刪除">🗑️</button>` : ''}
       </div>
     </div>`).join('');
 }
@@ -771,5 +786,121 @@ function renderNotes() {
     </div>`).join('');
 }
 </script>
+
+// ── DELETE EVENT ──
+async function deleteEvent(eventId, idx) {
+  if (!confirm('確定要刪除這個行程嗎？')) return;
+  try {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/' + eventId, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+    if (res.status === 204 || res.ok) {
+      // Remove from local map
+      const evs = gcalEventsMap[selDate] || [];
+      gcalEventsMap[selDate] = evs.filter(e => e.eventId !== eventId);
+      renderCal(); renderEvents();
+      showToast('🗑️ 行程已刪除', 'success');
+    } else {
+      showToast('❌ 刪除失敗，請稍後再試', 'error');
+    }
+  } catch(e) { showToast('❌ 刪除失敗', 'error'); }
+}
+
+// ── EDIT MODAL ──
+let editingEventId = null;
+let editingIdx = null;
+
+function openEditModal(eventId, idx) {
+  editingEventId = eventId;
+  editingIdx = idx;
+  const evs = gcalEventsMap[selDate] || [];
+  const ev = evs.find(e => e.eventId === eventId);
+  if (!ev) return;
+
+  document.getElementById('editTitle').value = ev.title || '';
+  document.getElementById('editLoc').value = ev.location || '';
+
+  // Parse time from startDT / endDT
+  if (ev.startDT) {
+    const d = new Date(ev.startDT);
+    document.getElementById('editStart').value = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  } else {
+    document.getElementById('editStart').value = ev.time ? ev.time.split('-')[0] : '09:00';
+  }
+  if (ev.endDT) {
+    const d = new Date(ev.endDT);
+    document.getElementById('editEnd').value = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  } else {
+    document.getElementById('editEnd').value = '10:00';
+  }
+
+  document.getElementById('editModal').style.display = 'flex';
+}
+
+function closeEditModal() {
+  document.getElementById('editModal').style.display = 'none';
+  editingEventId = null; editingIdx = null;
+}
+
+async function saveEdit() {
+  if (!editingEventId) return;
+  const title = document.getElementById('editTitle').value.trim();
+  if (!title) { showToast('請輸入行程名稱'); return; }
+  const t1 = document.getElementById('editStart').value || '09:00';
+  const t2 = document.getElementById('editEnd').value || '10:00';
+  const loc = document.getElementById('editLoc').value.trim();
+  const parts = selDate.split('-');
+  const y = parseInt(parts[0]), mo = parseInt(parts[1])-1, d = parseInt(parts[2]);
+  const [sh,sm] = t1.split(':').map(Number);
+  const [eh,em] = t2.split(':').map(Number);
+  const startDT = `${y}-${pad(mo+1)}-${pad(d)}T${pad(sh)}:${pad(sm)}:00+08:00`;
+  const endDT   = `${y}-${pad(mo+1)}-${pad(d)}T${pad(eh)}:${pad(em)}:00+08:00`;
+
+  const saveBtn = document.getElementById('editSaveBtn');
+  saveBtn.disabled = true; saveBtn.textContent = '儲存中...';
+
+  try {
+    const body = {
+      summary: title,
+      start: { dateTime: startDT, timeZone: 'Asia/Taipei' },
+      end:   { dateTime: endDT,   timeZone: 'Asia/Taipei' },
+    };
+    if (loc) body.location = loc;
+
+    const result = await gcalFetch('/calendars/primary/events/' + editingEventId, 'PUT', body);
+    if (result.id) {
+      // Update local
+      const evs = gcalEventsMap[selDate] || [];
+      const ev = evs.find(e => e.eventId === editingEventId);
+      if (ev) { ev.title = title; ev.time = t1; ev.location = loc; ev.startDT = startDT; ev.endDT = endDT; }
+      renderCal(); renderEvents();
+      closeEditModal();
+      showToast('✅ 行程已更新', 'success');
+    } else {
+      showToast('❌ 更新失敗，請稍後再試', 'error');
+    }
+  } catch(e) { showToast('❌ 更新失敗', 'error'); }
+  finally { saveBtn.disabled = false; saveBtn.textContent = '儲存'; }
+}
+
+
+<!-- EDIT MODAL -->
+<div id="editModal" style="display:none;position:fixed;inset:0;background:rgba(61,43,31,.45);z-index:999;align-items:center;justify-content:center;padding:20px">
+  <div class="modal-box">
+    <div class="modal-title">✏️ 編輯行程</div>
+    <div class="field"><label>行程名稱</label><input id="editTitle" placeholder="行程名稱"/></div>
+    <div class="field-row">
+      <div class="field"><label>開始時間</label><input id="editStart" type="time"/></div>
+      <div class="field"><label>結束時間</label><input id="editEnd" type="time"/></div>
+    </div>
+    <div class="field"><label>地點（選填）</label><input id="editLoc" placeholder="地址或線上連結"/></div>
+    <div class="modal-btns">
+      <button class="btn secondary" onclick="closeEditModal()" style="flex:1">取消</button>
+      <button class="btn primary" id="editSaveBtn" onclick="saveEdit()" style="flex:2">儲存</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
